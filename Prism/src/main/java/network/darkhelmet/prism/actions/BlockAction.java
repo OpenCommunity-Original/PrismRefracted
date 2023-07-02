@@ -35,6 +35,8 @@ import org.bukkit.block.data.Rotatable;
 import org.bukkit.block.data.Waterlogged;
 import org.bukkit.block.data.type.Bed;
 import org.bukkit.block.data.type.Bed.Part;
+import org.bukkit.block.sign.Side;
+import org.bukkit.block.sign.SignSide;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
@@ -61,6 +63,8 @@ import static org.bukkit.Material.WATER;
 
 
 public class BlockAction extends GenericAction {
+
+    private static final boolean POST_20 = Prism.getInstance().getServerMajorVersion() >= 20;
 
     private BlockActionData actionData;
 
@@ -125,10 +129,19 @@ public class BlockAction extends GenericAction {
                 actionData = commandActionData;
                 break;
             default:
-                if (Tag.SIGNS.isTagged(state.getType())) {
+                if (Tag.SIGNS.isTagged(state.getType()) || (POST_20 && Tag.ALL_SIGNS.isTagged(state.getType()))) {
                     final SignActionData signActionData = new SignActionData();
                     final Sign sign = (Sign) state;
                     signActionData.lines = sign.getLines();
+                    signActionData.color = sign.getColor();
+                    if (Prism.getInstance().getServerMajorVersion() >= 17)
+                        signActionData.glowing = sign.isGlowingText();
+                    if (POST_20) {
+                        SignSide backSide = sign.getSide(Side.BACK);
+                        signActionData.backLines = backSide.getLines();
+                        signActionData.backColor = backSide.getColor();
+                        signActionData.backGlowing = backSide.isGlowingText();
+                    }
                     actionData = signActionData;
                 }
                 if (Tag.BANNERS.isTagged(state.getType())) {
@@ -181,7 +194,7 @@ public class BlockAction extends GenericAction {
                 actionData = gson().fromJson(data, SkullActionData.class);
             } else if (getMaterial() == SPAWNER) {
                 actionData = gson().fromJson(data, SpawnerActionData.class);
-            } else if (Tag.SIGNS.isTagged(getMaterial())) {
+            } else if (Tag.SIGNS.isTagged(getMaterial()) || (POST_20 && Tag.ALL_SIGNS.isTagged(getMaterial()))) {
                 actionData = gson().fromJson(data, SignActionData.class);
             } else if (getMaterial() == COMMAND_BLOCK) {
                 actionData = new CommandActionData();
@@ -192,7 +205,11 @@ public class BlockAction extends GenericAction {
         }
     }
 
-    private BlockActionData getActionData() {
+    protected void setActionData(BlockActionData actionData) {
+        this.actionData = actionData;
+    }
+
+    protected BlockActionData getActionData() {
         return actionData;
     }
 
@@ -217,7 +234,22 @@ public class BlockAction extends GenericAction {
         if (blockActionData instanceof SignActionData) {
             final SignActionData ad = (SignActionData) blockActionData;
             if (ad.lines != null && ad.lines.length > 0) {
-                name += " (" + TypeUtils.join(ad.lines, ", ") + ")";
+                name += " (";
+                boolean joined = false;
+                String join = TypeUtils.join(ad.lines, ", ");
+                if (!join.isEmpty()) {
+                    name += join + ", ";
+                    joined = true;
+                }
+                if (ad.backLines != null) {
+                    join = TypeUtils.join(ad.backLines, ", ");
+                    name += join;
+                    joined = joined || !join.isEmpty();
+                }
+                if (!joined) {
+                    name += "no text";
+                }
+                name += ")";
             }
         } else if (blockActionData instanceof CommandActionData) {
             final CommandActionData ad = (CommandActionData) blockActionData;
@@ -287,6 +319,7 @@ public class BlockAction extends GenericAction {
         // (essentially liquid/air).
 
         final boolean cancelIfBadPlace = !getActionType().requiresHandler(BlockChangeAction.class)
+                && !getActionType().requiresHandler(FlowerPotChangeAction.class)
                 && !getActionType().requiresHandler(PrismRollbackAction.class) && !parameters.hasFlag(Flag.OVERWRITE);
 
         if (cancelIfBadPlace && !Utilities.isAcceptableForBlockPlace(block.getType())) {
@@ -408,8 +441,7 @@ public class BlockAction extends GenericAction {
                     && !blockActionData.customName.equals("")) {
                 ((Nameable) newState).setCustomName(blockActionData.customName);
             }
-            if (parameters.getProcessType() == PrismProcessType.ROLLBACK
-                    && Tag.SIGNS.isTagged(getMaterial())
+            if ((Tag.SIGNS.isTagged(getMaterial()) || (POST_20 && Tag.ALL_SIGNS.isTagged(getMaterial())))
                     && blockActionData instanceof SignActionData) {
 
                 final SignActionData s = (SignActionData) blockActionData;
@@ -420,10 +452,25 @@ public class BlockAction extends GenericAction {
                 // cannot be cast to org.bukkit.block.Sign
                 // https://snowy-evening.com/botsko/prism/455/
                 if (newState instanceof Sign) {
+                    Sign signState = (Sign) newState;
                     if (s.lines != null) {
                         for (int i = 0; i < s.lines.length; ++i) {
-                            ((Sign) newState).setLine(i, s.lines[i]);
+                            signState.setLine(i, s.lines[i]);
                         }
+                    }
+                    if (s.color != null) {
+                        signState.setColor(s.color);
+                    }
+                    if (Prism.getInstance().getServerMajorVersion() >= 17) {
+                        signState.setGlowingText(s.glowing);
+                    }
+                    if (POST_20 && s.backLines != null) {
+                        SignSide signSide = signState.getSide(Side.BACK);
+                        for (int i = 0; i < s.backLines.length; ++i) {
+                            signSide.setLine(i, s.backLines[i]);
+                        }
+                        signSide.setColor(s.backColor);
+                        signSide.setGlowingText(s.backGlowing);
                     }
                 }
             }
@@ -645,6 +692,11 @@ public class BlockAction extends GenericAction {
      */
     public static class SignActionData extends BlockActionData {
         String[] lines;
+        DyeColor color;
+        boolean glowing;
+        String[] backLines;
+        DyeColor backColor;
+        boolean backGlowing;
     }
 
     public static class BannerActionData extends RotatableActionData {
