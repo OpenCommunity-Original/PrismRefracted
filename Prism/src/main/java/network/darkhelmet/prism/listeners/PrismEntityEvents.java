@@ -1,5 +1,7 @@
 package network.darkhelmet.prism.listeners;
 
+import com.google.common.cache.Cache;
+import com.google.common.cache.CacheBuilder;
 import network.darkhelmet.prism.Prism;
 import network.darkhelmet.prism.actionlibs.ActionFactory;
 import network.darkhelmet.prism.actionlibs.RecordingQueue;
@@ -11,6 +13,7 @@ import network.darkhelmet.prism.utils.WandUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockState;
 import org.bukkit.entity.ArmorStand;
@@ -18,6 +21,7 @@ import org.bukkit.entity.Enderman;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Hanging;
+import org.bukkit.entity.Item;
 import org.bukkit.entity.ItemFrame;
 import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
@@ -37,6 +41,7 @@ import org.bukkit.event.entity.EntityDamageEvent;
 import org.bukkit.event.entity.EntityDeathEvent;
 import org.bukkit.event.entity.EntityTargetEvent;
 import org.bukkit.event.entity.EntityUnleashEvent;
+import org.bukkit.event.entity.ItemSpawnEvent;
 import org.bukkit.event.entity.PlayerLeashEntityEvent;
 import org.bukkit.event.entity.PotionSplashEvent;
 import org.bukkit.event.hanging.HangingBreakByEntityEvent;
@@ -47,9 +52,7 @@ import org.bukkit.event.player.PlayerInteractAtEntityEvent;
 import org.bukkit.event.player.PlayerInteractEntityEvent;
 import org.bukkit.event.player.PlayerShearEntityEvent;
 import org.bukkit.event.player.PlayerUnleashEntityEvent;
-import org.bukkit.inventory.EntityEquipment;
 import org.bukkit.inventory.EquipmentSlot;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.projectiles.BlockProjectileSource;
@@ -57,13 +60,21 @@ import org.bukkit.projectiles.ProjectileSource;
 import org.bukkit.util.Vector;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 public class PrismEntityEvents implements Listener {
 
     private final Prism plugin;
+
+    private static final Cache<Location, DropItems> dropCache = CacheBuilder
+            .newBuilder()
+            .expireAfterWrite(30, TimeUnit.SECONDS)
+            .build();
 
     /**
      * Constructor.
@@ -123,42 +134,7 @@ public class PrismEntityEvents implements Listener {
             // Log item drops
             if (Prism.getIgnore().event("item-drop", entity.getWorld())) {
                 String name = entity.getType().name().toLowerCase();
-
-                // Inventory
-                if (entity instanceof InventoryHolder) {
-                    final InventoryHolder holder = (InventoryHolder) entity;
-
-                    for (final ItemStack i : holder.getInventory().getContents()) {
-                        if (checkNotNullorAir(i)) {
-                            RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", i, i.getAmount(), -1,
-                                    null, entity.getLocation(), name));
-                        }
-                    }
-                }
-
-                // Equipment
-                EntityEquipment equipment = entity.getEquipment();
-                if (equipment != null) {
-                    for (final ItemStack i : equipment.getArmorContents()) {
-                        if (checkNotNullorAir(i)) {
-                            RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", i, i.getAmount(), -1,
-                                    null, entity.getLocation(), name));
-                        }
-                    }
-                }
-                // Hand items not stored in "getArmorContents"
-                ItemStack main = entity.getEquipment().getItemInMainHand();
-                ItemStack off = entity.getEquipment().getItemInOffHand();
-
-                if (checkNotNullorAir(main)) {
-                    RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", main, main.getAmount(), -1,
-                            null, entity.getLocation(), name));
-                }
-
-                if (checkNotNullorAir(off)) {
-                    RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", off, off.getAmount(), -1,
-                            null, entity.getLocation(), name));
-                }
+                dropCache.put(event.getEntity().getLocation(), new DropItems(event.getDrops(), name));
 
             }
 
@@ -292,15 +268,64 @@ public class PrismEntityEvents implements Listener {
                 }
                 RecordingQueue.addToQueue(ActionFactory.createPlayerDeath("player-death", p, cause, attacker));
             }
+        }
+    }
 
-            // Log item drops
-            if (Prism.getIgnore().event("item-drop", p)) {
-                if (!event.getDrops().isEmpty()) {
-                    for (final ItemStack i : event.getDrops()) {
-                        RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", i, i.getAmount(), -1, null,
-                                p.getLocation(), p));
-                    }
-                }
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onPlayerDropItemSpawn(final CreatureSpawnEvent event) {
+        // For getting Item correctly removed in rollback.
+        if (event.getSpawnReason() != CreatureSpawnEvent.SpawnReason.CUSTOM) {
+            return;
+        }
+        Entity entity = event.getEntity();
+        if (!(entity instanceof Item)) {
+            return;
+        }
+
+        DropItems drops = dropCache.getIfPresent(event.getLocation());
+        if (drops == null) {
+            return;
+        }
+        Item itemEntity = (Item) entity;
+        ItemStack itemStack = itemEntity.getItemStack();
+        if (drops.itemStacks.contains(itemStack)) {
+            if (drops.sourceName != null) {
+                RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", itemStack, itemStack.getAmount(), -1, null,
+                        event.getLocation(), drops.sourceName));
+            } else {
+                RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", itemStack, itemStack.getAmount(), -1, null,
+                        event.getLocation(), drops.player));
+            }
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityDeathDropItemSpawn(final ItemSpawnEvent event) {
+        // For getting Item correctly removed in rollback.
+        Item entity = event.getEntity();
+        Location location = event.getLocation();
+        DropItems drops = null;
+        for (Map.Entry<Location, DropItems> entry : dropCache.asMap().entrySet()) {
+            Location entryLocation = entry.getKey();
+            // It has random yaw and pitch when spawn the drops. We cannot directly get by hashcode.
+            if (location.getWorld().equals(entryLocation.getWorld()) && location.getX() == entryLocation.getX()
+                    && location.getY() == entryLocation.getY() && location.getZ() == entryLocation.getZ()) {
+                drops = entry.getValue();
+                break;
+            }
+        }
+
+        if (drops == null) {
+            return;
+        }
+        ItemStack itemStack = entity.getItemStack();
+        if (drops.itemStacks.contains(itemStack)) {
+            if (drops.sourceName != null) {
+                RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", itemStack, itemStack.getAmount(), -1, null,
+                        location, drops.sourceName));
+            } else {
+                RecordingQueue.addToQueue(ActionFactory.createItemStack("item-drop", itemStack, itemStack.getAmount(), -1, null,
+                        location, drops.player));
             }
         }
     }
@@ -761,5 +786,107 @@ public class PrismEntityEvents implements Listener {
             RecordingQueue.addToQueue(ActionFactory.createBlockChange("entity-form", block.getType(),
                     block.getBlockData(), newState, entity));
         }
+    }
+
+    /**
+     * EntityExplodeEvent.
+     * @param event EntityExplodeEvent
+     */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onEntityExplodeChangeBlock(final EntityExplodeEvent event) {
+
+        if (event.blockList().isEmpty()) {
+            return;
+        }
+        String name;
+        String action = "entity-explode";
+        if (event.getEntity() != null) {
+            if (event.getEntity() instanceof Creeper) {
+                if (!Prism.getIgnore().event("creeper-explode", event.getEntity().getWorld())) {
+                    return;
+                }
+                action = "creeper-explode";
+                name = "creeper";
+            } else if (event.getEntity() instanceof TNTPrimed) {
+                if (!Prism.getIgnore().event("tnt-explode", event.getEntity().getWorld())) {
+                    return;
+                }
+                action = "tnt-explode";
+                Entity source = ((TNTPrimed) event.getEntity()).getSource();
+                name = followTntTrail(source);
+            } else if (event.getEntity() instanceof EnderDragon) {
+                if (!Prism.getIgnore().event("dragon-eat", event.getEntity().getWorld())) {
+                    return;
+                }
+                action = "dragon-eat";
+                name = "enderdragon";
+            } else {
+                if (!Prism.getIgnore().event("entity-explode", event.getLocation().getWorld())) {
+                    return;
+                }
+                try {
+                    name = event.getEntity().getType().name().toLowerCase().replace("_", " ");
+                    name = name.length() > 15 ? name.substring(0, 15) : name; // I
+                } catch (final NullPointerException e) {
+                    name = "unknown";
+                }
+            }
+        } else {
+            if (!Prism.getIgnore().event("entity-explode", event.getLocation().getWorld())) {
+                return;
+            }
+            name = "magic";
+        }
+        contructBlockEvent(action,name,event.blockList());
+    }
+
+    private String followTntTrail(Entity initial) {
+        int counter = 10000000;
+
+        while (initial != null) {
+            if (initial instanceof Player) {
+                return initial.getName();
+            } else if (initial instanceof TNTPrimed) {
+                initial = (((TNTPrimed) initial).getSource());
+                if (counter < 0 && initial != null) {
+                    Location last = initial.getLocation();
+                    plugin.getLogger().warning("TnT chain has exceeded one million, will not continue!");
+                    plugin.getLogger().warning("Last Tnt was at " + last.getX() + ", " + last.getY() + ". "
+                            + last.getZ() + " in world " + last.getWorld());
+                    return "tnt";
+                }
+                counter--;
+            } else {
+                return initial.getType().name();
+            }
+        }
+
+        return "tnt";
+    }
+
+    public static class DropItems {
+
+        final List<ItemStack> itemStacks;
+        final OfflinePlayer player;
+        final String sourceName;
+
+        public DropItems(List<ItemStack> itemStacks, String sourceName) {
+            this.itemStacks = itemStacks;
+            this.player = null;
+            this.sourceName = sourceName;
+        }
+
+        public DropItems(List<ItemStack> itemStacks, OfflinePlayer player) {
+            this.itemStacks = itemStacks;
+            this.player = player;
+            this.sourceName = null;
+        }
+
+        public DropItems(List<ItemStack> itemStacks, OfflinePlayer player, String sourceName) {
+            this.itemStacks = itemStacks;
+            this.player = player;
+            this.sourceName = sourceName;
+        }
+
     }
 }
