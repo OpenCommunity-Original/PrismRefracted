@@ -4,11 +4,7 @@ import network.darkhelmet.prism.Il8nHelper;
 import network.darkhelmet.prism.Prism;
 import network.darkhelmet.prism.actionlibs.ActionsQuery;
 import network.darkhelmet.prism.actionlibs.QueryParameters;
-import network.darkhelmet.prism.actions.BlockAction;
-import network.darkhelmet.prism.actions.GenericAction;
-import network.darkhelmet.prism.actions.HangingItemAction;
-import network.darkhelmet.prism.actions.ItemStackAction;
-import network.darkhelmet.prism.actions.SignAction;
+import network.darkhelmet.prism.actions.*;
 import network.darkhelmet.prism.api.BlockStateChange;
 import network.darkhelmet.prism.api.ChangeResult;
 import network.darkhelmet.prism.api.ChangeResultType;
@@ -262,7 +258,7 @@ public class Preview implements Previewable {
                             if (processType.equals(PrismProcessType.RESTORE)) {
                                 if (match && !action.isRollbacked()) {
                                     if (action instanceof BlockAction || action instanceof HangingItemAction
-                                            || action instanceof ItemStackAction || action instanceof SignAction) {
+                                            || action instanceof ItemStackAction || action instanceof SignChangeAction) {
                                         stateSkippedCount++;
                                         skippedBlockCount++;
                                     }
