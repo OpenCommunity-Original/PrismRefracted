@@ -13,7 +13,6 @@ import network.darkhelmet.prism.utils.MaterialTag;
 import network.darkhelmet.prism.utils.TypeUtils;
 import network.darkhelmet.prism.utils.block.Utilities;
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
 import org.bukkit.DyeColor;
 import org.bukkit.Nameable;
 import org.bukkit.Tag;
@@ -37,6 +36,7 @@ import org.bukkit.block.data.type.Bed;
 import org.bukkit.block.data.type.Bed.Part;
 import org.bukkit.block.sign.Side;
 import org.bukkit.block.sign.SignSide;
+import org.bukkit.block.data.type.RespawnAnchor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.EntityType;
 import org.bukkit.entity.Player;
@@ -57,6 +57,7 @@ import static org.bukkit.Material.NETHER_PORTAL;
 import static org.bukkit.Material.OBSIDIAN;
 import static org.bukkit.Material.PLAYER_HEAD;
 import static org.bukkit.Material.PLAYER_WALL_HEAD;
+import static org.bukkit.Material.RESPAWN_ANCHOR;
 import static org.bukkit.Material.SPAWNER;
 import static org.bukkit.Material.TRAPPED_CHEST;
 import static org.bukkit.Material.WATER;
@@ -128,6 +129,11 @@ public class BlockAction extends GenericAction {
                 commandActionData.command = cmdBlock.getCommand();
                 actionData = commandActionData;
                 break;
+            case RESPAWN_ANCHOR:
+                final RespawnAnchorActionData respawnAnchorActionData = new RespawnAnchorActionData();
+                respawnAnchorActionData.charges = ((RespawnAnchor) state.getBlockData()).getCharges();
+                actionData = respawnAnchorActionData;
+                break;
             default:
                 if (Tag.SIGNS.isTagged(state.getType()) || (POST_20 && Tag.ALL_SIGNS.isTagged(state.getType()))) {
                     final SignActionData signActionData = new SignActionData();
@@ -197,8 +203,9 @@ public class BlockAction extends GenericAction {
             } else if (Tag.SIGNS.isTagged(getMaterial()) || (POST_20 && Tag.ALL_SIGNS.isTagged(getMaterial()))) {
                 actionData = gson().fromJson(data, SignActionData.class);
             } else if (getMaterial() == COMMAND_BLOCK) {
-                actionData = new CommandActionData();
-                ((CommandActionData) actionData).command = data;
+                actionData = gson().fromJson(data, CommandActionData.class);
+            } else if (getMaterial() == RESPAWN_ANCHOR) {
+                actionData = gson().fromJson(data, RespawnAnchorActionData.class);
             } else {
                 actionData = gson().fromJson(data, BlockActionData.class);
             }
@@ -254,6 +261,9 @@ public class BlockAction extends GenericAction {
         } else if (blockActionData instanceof CommandActionData) {
             final CommandActionData ad = (CommandActionData) blockActionData;
             name += " (" + ad.command + ")";
+        } else if (blockActionData instanceof RespawnAnchorActionData) {
+            RespawnAnchorActionData ad = (RespawnAnchorActionData) blockActionData;
+            name += " (" + ad.charges + " charge" + (ad.charges > 1 ? "s)" : ")");
         }
         if (blockActionData.customName != null && !blockActionData.customName.isEmpty()) {
             name += " (" + blockActionData.customName + ")";
@@ -418,11 +428,9 @@ public class BlockAction extends GenericAction {
             if ((getMaterial() == PLAYER_HEAD || getMaterial() == PLAYER_WALL_HEAD)
                     && blockActionData instanceof SkullActionData) {
                 return handleSkulls(block, blockActionData, originalBlock);
-            }
-            if (Tag.BANNERS.isTagged(getMaterial()) && blockActionData instanceof BannerActionData) {
+            } else if (Tag.BANNERS.isTagged(getMaterial()) && blockActionData instanceof BannerActionData) {
                 return handleBanners(block, blockActionData, originalBlock);
-            }
-            if (getMaterial() == SPAWNER && blockActionData instanceof SpawnerActionData) {
+            } else if (getMaterial() == SPAWNER && blockActionData instanceof SpawnerActionData) {
 
                 final SpawnerActionData s = (SpawnerActionData) blockActionData;
 
@@ -430,13 +438,15 @@ public class BlockAction extends GenericAction {
                 ((CreatureSpawner) newState).setDelay(s.getDelay());
                 ((CreatureSpawner) newState).setSpawnedType(s.getEntityType());
 
-            }
-
-            if (getMaterial() == COMMAND_BLOCK
+            } else if (getMaterial() == COMMAND_BLOCK
                     && blockActionData instanceof CommandActionData) {
                 final CommandActionData c = (CommandActionData) blockActionData;
                 ((CommandBlock) newState).setCommand(c.command);
+            } else if (getMaterial() == RESPAWN_ANCHOR && blockActionData instanceof RespawnAnchorActionData) {
+                final RespawnAnchorActionData ra = (RespawnAnchorActionData) blockActionData;
+                ((RespawnAnchor) newState.getBlockData()).setCharges(ra.charges);
             }
+
             if (newState instanceof Nameable && blockActionData.customName != null
                     && !blockActionData.customName.equals("")) {
                 ((Nameable) newState).setCustomName(blockActionData.customName);
@@ -701,6 +711,10 @@ public class BlockAction extends GenericAction {
 
     public static class BannerActionData extends RotatableActionData {
         Map<String, String> patterns;
+    }
+
+    public static class RespawnAnchorActionData extends BlockActionData {
+        int charges;
     }
 
 }
