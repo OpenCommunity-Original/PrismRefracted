@@ -14,6 +14,8 @@ import network.darkhelmet.prism.utils.TypeUtils;
 import network.darkhelmet.prism.utils.block.Utilities;
 import org.bukkit.Bukkit;
 import org.bukkit.DyeColor;
+import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.Nameable;
 import org.bukkit.Tag;
 import org.bukkit.block.Banner;
@@ -22,6 +24,7 @@ import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
 import org.bukkit.block.CommandBlock;
 import org.bukkit.block.CreatureSpawner;
+import org.bukkit.block.DecoratedPot;
 import org.bukkit.block.Sign;
 import org.bukkit.block.Skull;
 import org.bukkit.block.banner.Pattern;
@@ -47,20 +50,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.bukkit.Material.AIR;
-import static org.bukkit.Material.CHEST;
-import static org.bukkit.Material.COMMAND_BLOCK;
-import static org.bukkit.Material.FARMLAND;
-import static org.bukkit.Material.FIRE;
-import static org.bukkit.Material.JUKEBOX;
-import static org.bukkit.Material.NETHER_PORTAL;
-import static org.bukkit.Material.OBSIDIAN;
-import static org.bukkit.Material.PLAYER_HEAD;
-import static org.bukkit.Material.PLAYER_WALL_HEAD;
-import static org.bukkit.Material.RESPAWN_ANCHOR;
-import static org.bukkit.Material.SPAWNER;
-import static org.bukkit.Material.TRAPPED_CHEST;
-import static org.bukkit.Material.WATER;
+import static org.bukkit.Material.*;
 
 
 public class BlockAction extends GenericAction {
@@ -149,8 +139,13 @@ public class BlockAction extends GenericAction {
                         signActionData.backGlowing = backSide.isGlowingText();
                     }
                     actionData = signActionData;
-                }
-                if (Tag.BANNERS.isTagged(state.getType())) {
+                } else if (POST_20 && state.getType() == Material.DECORATED_POT) {
+                    final DecoratedPot pot = (DecoratedPot) state;
+                    final PotActionData potActionData = new PotActionData();
+                    potActionData.shards = pot.getShards();
+                    setBlockRotation(state, potActionData);
+                    actionData = potActionData;
+                } else if (Tag.BANNERS.isTagged(state.getType())) {
                     final BannerActionData bannerActionData = new BannerActionData();
                     final Banner banner = (Banner) state;
                     bannerActionData.patterns = new HashMap<>();
@@ -203,9 +198,11 @@ public class BlockAction extends GenericAction {
             } else if (Tag.SIGNS.isTagged(getMaterial()) || (POST_20 && Tag.ALL_SIGNS.isTagged(getMaterial()))) {
                 actionData = gson().fromJson(data, SignActionData.class);
             } else if (getMaterial() == COMMAND_BLOCK) {
-                actionData = gson().fromJson(data, CommandActionData.class);
+                actionData = new CommandActionData();
+                ((CommandActionData) actionData).command = data;
+            } else if (POST_20 && getMaterial() == DECORATED_POT) {
+                actionData = gson().fromJson(data, PotActionData.class);
             } else if (getMaterial() == RESPAWN_ANCHOR) {
-                actionData = gson().fromJson(data, RespawnAnchorActionData.class);
             } else {
                 actionData = gson().fromJson(data, BlockActionData.class);
             }
@@ -484,6 +481,18 @@ public class BlockAction extends GenericAction {
                     }
                 }
             }
+            System.out.println(getMaterial());
+            System.out.println(actionData.getClass().getName());
+            if (POST_20 && getMaterial() == DECORATED_POT && actionData instanceof PotActionData) {
+                Location location = block.getLocation();
+                PotActionData potActionData = (PotActionData) actionData;
+                // TODO: getShards not mutable; waiting for API
+//                DecoratedPot pot = (DecoratedPot) newState;
+//                List<Material> shards = pot.getShards();
+//                shards.clear();
+//                shards.addAll((potActionData).shards);
+                setBlockRotatable(newState, potActionData);
+            }
         } else {
             Prism.debug("BlockAction Data was null with " + parameters.toString());
         }
@@ -691,6 +700,12 @@ public class BlockAction extends GenericAction {
     public static class SkullActionData extends RotatableActionData {
 
         String owner;
+
+    }
+
+    public static class PotActionData extends RotatableActionData {
+
+        List<Material> shards;
 
     }
 
