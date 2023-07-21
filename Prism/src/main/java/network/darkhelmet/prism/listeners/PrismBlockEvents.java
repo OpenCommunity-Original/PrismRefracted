@@ -57,7 +57,7 @@ public class PrismBlockEvents implements Listener {
      * @param plugin Prism
      */
     public PrismBlockEvents(Prism plugin) {
-        super(plugin);
+        this.plugin = plugin;
 
         if (Prism.getInstance().getServerMajorVersion() >= 20) {
             try {
