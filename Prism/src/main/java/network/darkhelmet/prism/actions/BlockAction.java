@@ -14,7 +14,6 @@ import network.darkhelmet.prism.utils.TypeUtils;
 import network.darkhelmet.prism.utils.block.Utilities;
 import org.bukkit.Bukkit;
 import org.bukkit.DyeColor;
-import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.Nameable;
 import org.bukkit.Tag;
@@ -46,6 +45,7 @@ import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -142,7 +142,8 @@ public class BlockAction extends GenericAction {
                 } else if (POST_20 && state.getType() == Material.DECORATED_POT) {
                     final DecoratedPot pot = (DecoratedPot) state;
                     final PotActionData potActionData = new PotActionData();
-                    potActionData.shards = pot.getShards();
+                    Map<DecoratedPot.Side, Material> sherds = pot.getSherds();
+                    potActionData.sherds = Arrays.stream(DecoratedPot.Side.values()).map(sherds::get).toArray(Material[]::new);
                     setBlockRotation(state, potActionData);
                     actionData = potActionData;
                 } else if (Tag.BANNERS.isTagged(state.getType())) {
@@ -481,16 +482,19 @@ public class BlockAction extends GenericAction {
                     }
                 }
             }
-            System.out.println(getMaterial());
-            System.out.println(actionData.getClass().getName());
             if (POST_20 && getMaterial() == DECORATED_POT && actionData instanceof PotActionData) {
-                Location location = block.getLocation();
                 PotActionData potActionData = (PotActionData) actionData;
-                // TODO: getShards not mutable; waiting for API
-//                DecoratedPot pot = (DecoratedPot) newState;
-//                List<Material> shards = pot.getShards();
-//                shards.clear();
-//                shards.addAll((potActionData).shards);
+                if (potActionData.sherds != null) {
+                    DecoratedPot pot = (DecoratedPot) newState;
+
+                    DecoratedPot.Side[] sides = DecoratedPot.Side.values();
+                    // Math.min : not necessary but might be safe for later minecraft updates
+                    for (int i = 0, length = Math.min(sides.length, potActionData.sherds.length); i < length; i++) {
+                        DecoratedPot.Side side = sides[i];
+                        pot.setSherd(side, potActionData.sherds[i]);
+                    }
+                }
+
                 setBlockRotatable(newState, potActionData);
             }
         } else {
@@ -705,7 +709,10 @@ public class BlockAction extends GenericAction {
 
     public static class PotActionData extends RotatableActionData {
 
-        List<Material> shards;
+        /**
+         * BACK, LEFT, RIGHT, FRONT on Spigot 1.20.1
+         */
+        Material[] sherds;
 
     }
 
